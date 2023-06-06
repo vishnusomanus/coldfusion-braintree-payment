@@ -1,9 +1,12 @@
 <cfcomponent>
   <cfset application.braintreeEnvironment = "sandbox">
-  <cfset application.braintreeMerchantId = "xxxxxxx">
-  <cfset application.braintreePublicKey = "xxxxxxx">
-  <cfset application.braintreePrivateKey = "xxxxxx">
-
+  <cfset application.braintreeMerchantId = "rgtzhzyyvgsk4bhg">
+  <cfset application.braintreePublicKey = "c66fm6wdw3kk6tpy">
+  <cfset application.braintreePrivateKey = "61c87ca474b0aacdbcae4f8de1b3291d">
+  <cfset application.braintreeApiUrl = "https://payments.sandbox.braintree-api.com/graphql">
+  <cfset application.braintreeVersion = "2019-01-01">
+  <cfset application.braintreeAuth = "Basic " & #toBase64(application.braintreePublicKey & ":" & application.braintreePrivateKey)#>
+  
   <cfset gateway = CreateObject("java", "com.braintreegateway.BraintreeGateway").init(
     application.braintreeEnvironment,
     application.braintreeMerchantId,
@@ -62,7 +65,124 @@
     <cfreturn response>
   </cffunction>
   
+  <cffunction name="authorizePayment" access="public">
+    <cfargument name="paymentMethodId" type="string" required="true">
+    <cfargument name="amount" type="string" required="true">
+  
+    <cfhttp url="#application.braintreeApiUrl#" method="POST" result="result">
+      <cfhttpparam type="header" name="Content-Type" value="application/json" >
+      <cfhttpparam type="header" name="Braintree-Version" value="#application.braintreeVersion#">
+      <cfhttpparam type="header" name="Authorization" value="#application.braintreeAuth#">
+      <cfhttpparam type="body" value='{
+      "query":"mutation ExampleAuth($input: AuthorizePaymentMethodInput!) {authorizePaymentMethod(input: $input) { transaction { id amount { value }  status merchantId  } } }",
+      "variables":{
+        "input":{
+          "paymentMethodId":"#arguments.paymentMethodId#",
+          "transaction":{"amount":"#arguments.amount#"}
+        }}
+      }'>
 
+    </cfhttp>
+  
+    <cfreturn DeserializeJSON(result.filecontent)>
+  </cffunction>
+  
+
+  <cffunction name="capturePayment" access="public" output="false">
+    <cfargument name="transactionId" type="string" required="true">
+    <cfargument name="amount" type="string" required="true">
+      
+    <cfset var response = {
+      "success": false,
+      "message": "",
+      "transactionId": "",
+      "status": "",
+      "amount": "",
+      "currency": ""
+    }>
+      
+    <cftry>
+      <cfset bigDecimal = createObject("java", "java.math.BigDecimal").init(arguments.amount)>
+      <cfset result = gateway.transaction().submitForSettlement(arguments.transactionId, bigDecimal)>
+      <cfif result.isSuccess()>
+        <cfset response.success = true>
+        <cfset response.message = "Payment captured.">
+        <cfset transaction = result.getTarget()>
+        <cfset response.transactionId = transaction.getId()>
+        <cfset response.status = transaction.getStatus().name()>
+        <cfset response.amount = transaction.getAmount()>
+        <cfset response.currency = transaction.getCurrencyIsoCode()>
+        <!--- Add more payment details as needed --->
+      <cfelse>
+        <cfset response.message = result.getMessage()>
+      </cfif>
+      <cfcatch type="any">
+        <cfset response.message = cfcatch.message>
+      </cfcatch>
+    </cftry>
+    
+    <cfreturn response>
+  </cffunction>
+
+  <cffunction name="voidPayment" access="public" output="false">
+    <cfargument name="transactionId" type="string" required="true">
+    
+    <cfset var response = {
+      "success": false,
+      "message": "",
+      "transactionId": "",
+      "status": ""
+    }>
+    
+    <cftry>
+      <cfset result = gateway.transaction().voidTransaction(arguments.transactionId)>
+      <cfif result.isSuccess()>
+        <cfset response.success = true>
+        <cfset response.message = "Transaction voided.">
+        <cfset transaction = result.getTarget()>
+        <cfset response.transactionId = transaction.getId()>
+        <cfset response.status = transaction.getStatus().name()>
+      <cfelse>
+        <cfset response.message = result.getMessage()>
+      </cfif>
+    <cfcatch type="any">
+      <cfset response.message = cfcatch.message>
+    </cfcatch>
+    </cftry>
+    
+    <cfreturn response>
+  </cffunction>
+
+  <cffunction name="createRefund" access="public" output="false">
+    <cfargument name="transactionId" type="string" required="true">
+    <cfargument name="amount" type="string" required="true">
+    
+    <cfset var response = {
+      "success": false,
+      "message": "",
+      "refundId": ""
+    }>
+    
+    <cftry>
+      <cfset bigDecimal = createObject("java", "java.math.BigDecimal").init(arguments.amount)>
+      <cfset result = gateway.transaction().refund(arguments.transactionId, bigDecimal)>
+      <cfif result.isSuccess()>
+        <cfset response.success = true>
+        <cfset response.message = "Refund successfully created.">
+        <cfset refund = result.getTarget()>
+        <cfset response.refundId = refund.getId()>
+      <cfelse>
+        <cfset response.message = result.getMessage()>
+      </cfif>
+    <cfcatch type="any">
+      <cfset response.message = cfcatch.message>
+    </cfcatch>
+    </cftry>
+    
+    <cfreturn response>
+  </cffunction>
+  
+  
 
   <cffunction name="getTransactionDetails" access="public" output="false">
     <cfargument name="transactionId" type="string" required="true">
@@ -85,21 +205,37 @@
     <cfreturn transactionDetails>
   </cffunction>
 
-  <!--- Refund a transaction by transaction ID --->
-  <cffunction name="refundTransaction" access="public" output="false">
-    <cfargument name="transactionId" type="string" required="true">
-    <cfset success = false>
-    <cftry>
-      <cfset result = gateway.transaction().refund(arguments.transactionId)>
-      <cfif result.isSuccess()>
-        <cfset success = true>
-      </cfif>
-      <cfcatch>
-        <cfset success = false>
-      </cfcatch>
-    </cftry>
-    <cfreturn success>
-  </cffunction>
+
+
+
+<cffunction name="createCustomer" access="public">
+  
+  <cfargument name="firstName" type="string" required="true">
+  <cfargument name="lastName" type="string" required="true">
+  <cfargument name="company" type="string" required="false">
+
+  <cfhttp url="#application.braintreeApiUrl#" method="POST" result="result">
+      <cfhttpparam type="header" name="Content-Type" value="application/json" >
+      <cfhttpparam type="header" name="Braintree-Version" value="#application.braintreeVersion#">
+      <cfhttpparam type="header" name="Authorization" value="#application.braintreeAuth#">
+      <cfhttpparam type="body" value='{
+          "query": "mutation CreateCustomer($input: CreateCustomerInput!) { createCustomer(input: $input) { customer { id legacyId firstName lastName company } } }",
+          "variables": {
+              "input": {
+                  "customer": {
+                      "firstName": "#arguments.firstName#",
+                      "lastName": "#arguments.lastName#",
+                      "company": "#arguments.company#"
+                  }
+              }
+          }
+      }'>
+
+  </cfhttp>
+  <cfreturn DeserializeJSON(result.filecontent).data.createCustomer.customer  >
+</cffunction>
+
+
 
   <cffunction name="searchTransactions" access="public" output="false">
     <cfargument name="status" type="string" required="false">
@@ -249,32 +385,7 @@
     <cfreturn success>
   </cffunction>
   
-  <cffunction name="createCustomer" access="public" output="false">
-    <cfargument name="customerData" type="struct" required="true">
-    
-    <cfset customerId = ''>
-    <cftry>
-      <cfset request = CreateObject("java", "com.braintreegateway.CustomerRequest")>
-      
-      <!--- Set customer details based on input arguments --->
-      <cfloop collection="#arguments.customerData#" item="key">
-        <cfset request[key] = arguments.customerData[key]>
-      </cfloop>
-      
-      <!--- Create the customer --->
-      <cfset result = gateway.customer().create(request)>
-      
-      <cfif result.isSuccess()>
-        <cfset customerId = result.getTarget().getId()>
-      </cfif>
-      
-      <cfcatch>
-        <cfset customerId = ''>
-      </cfcatch>
-    </cftry>
-    
-    <cfreturn customerId>
-  </cffunction>
+
   
   <cffunction name="updateCustomer" access="public" output="false">
     <cfargument name="customerId" type="string" required="true">
@@ -314,10 +425,12 @@
       
       <!--- Retrieve the customer details by ID --->
       <cfset customer = gateway.customer().find(arguments.customerId)>
-      
       <cfset customerDetails.customerId = customer.getId()>
       <cfset customerDetails.firstName = customer.getFirstName()>
       <cfset customerDetails.lastName = customer.getLastName()>
+      <cfset customerDetails.email = customer.getEmail()>
+      <cfset customerDetails.phone = customer.getPhone()>
+      <cfset customerDetails.website = customer.getWebsite()>
       <!--- Add more details as needed --->
       
       <cfcatch>
